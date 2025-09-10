@@ -144,13 +144,15 @@ class HVControlPanel(QDialog):
         self.channel_selector.addItems([str(ch) for ch in channels_to_monitor])
         self.layout.addWidget(self.channel_selector, 0, 1, 1, 2)
 
-        self.layout.addWidget(QLabel("Set Voltage (V0Set):"), 1, 0)
+        # <<<<< [수정] 파라미터 이름을 'VSet'으로 변경하고 라벨도 수정
+        self.layout.addWidget(QLabel("Set Voltage (VSet):"), 1, 0)
         self.voltage_input = QDoubleSpinBox(); self.voltage_input.setRange(0, 8000); self.voltage_input.setDecimals(2)
         self.layout.addWidget(self.voltage_input, 1, 1)
         self.set_voltage_btn = QPushButton("Set Voltage"); self.set_voltage_btn.clicked.connect(self.set_voltage)
         self.layout.addWidget(self.set_voltage_btn, 1, 2)
         
-        self.layout.addWidget(QLabel("Set Current (I0Set, uA):"), 2, 0)
+        # <<<<< [수정] 파라미터 이름을 'ISet'으로 변경하고 라벨도 수정
+        self.layout.addWidget(QLabel("Set Current (ISet, uA):"), 2, 0)
         self.current_input = QDoubleSpinBox(); self.current_input.setRange(0, 1000); self.current_input.setDecimals(2)
         self.layout.addWidget(self.current_input, 2, 1)
         self.set_current_btn = QPushButton("Set Current"); self.set_current_btn.clicked.connect(self.set_current)
@@ -174,12 +176,13 @@ class HVControlPanel(QDialog):
 
     # 각 버튼 클릭 시 실행될 함수들
     def set_voltage(self):
-        # (명령 종류, 슬롯, 채널, 파라미터명, 값) 형식의 튜플로 명령 생성 후 신호 발생
-        command = ('set_param', 0, self.get_selected_channel(), 'V0Set', self.voltage_input.value())
+        # <<<<< [수정] 파라미터 이름을 'VSet'으로 변경
+        command = ('set_param', 0, self.get_selected_channel(), 'VSet', self.voltage_input.value())
         self.control_signal.emit(command)
 
     def set_current(self):
-        command = ('set_param', 0, self.get_selected_channel(), 'I0Set', self.current_input.value())
+        # <<<<< [수정] 파라미터 이름을 'ISet'으로 변경
+        command = ('set_param', 0, self.get_selected_channel(), 'ISet', self.current_input.value())
         self.control_signal.emit(command)
 
     def turn_on(self):
