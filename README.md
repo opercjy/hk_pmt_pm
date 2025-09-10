@@ -93,7 +93,6 @@
 ├── config.json             \# 모든 설정을 담은 파일
 ├── arduino_sketch/
 │   └── multi_sensor_sketch.ino \# 아두이노에 업로드할 스케치
-├── caen_libs/              \# CAEN HV Wrapper 라이브러리 폴더
 └── README.md               \# 프로젝트 설명 파일
 
 
