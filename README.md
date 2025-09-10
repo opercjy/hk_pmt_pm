@@ -82,19 +82,18 @@
     python3 monitoring_app.py
     ```
 <img width="1820" height="990" alt="image" src="https://github.com/user-attachments/assets/d38e2250-54af-4d09-95af-83de52cc48c2" />
-<img width="1795" height="969" alt="image" src="https://github.com/user-attachments/assets/a3d0d38e-1bed-4afc-81c6-f6f010d33930" />
+<img width="331" height="294" alt="image" src="https://github.com/user-attachments/assets/666f5163-f796-4e52-ad74-e372f81c6daa" />
+<img width="1820" height="990" alt="image" src="https://github.com/user-attachments/assets/c5e77540-e3a3-48d9-8c94-afbbb61064a0" />
 
 ## 6. 파일 구조
 
 ````
-
-.
 ├── monitoring_app.py       \# 메인 파이썬 스크립트
 ├── config.json             \# 모든 설정을 담은 파일
 ├── arduino_sketch/
 │   └── multi_sensor_sketch.ino \# 아두이노에 업로드할 스케치
 └── README.md               \# 프로젝트 설명 파일
-
+````
 
 -----
 
