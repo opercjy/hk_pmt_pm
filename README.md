@@ -81,7 +81,7 @@
     ```bash
     python3 monitoring_app.py
     ```
-<img width="1820" height="990" alt="image" src="https://github.com/user-attachments/assets/d38e2250-54af-4d09-95af-83de52cc48c2" />
+<img width="1820" height="990" alt="image" src="https://github.com/user-attachments/assets/2c956fe7-0e90-4bbd-93f7-e6c6e0e981af" />
 <img width="331" height="294" alt="image" src="https://github.com/user-attachments/assets/666f5163-f796-4e52-ad74-e372f81c6daa" /><img width="324" height="240" alt="image" src="https://github.com/user-attachments/assets/cf14d72b-5a18-4181-90a6-9ed27744e03d" />
 
 <img width="1820" height="990" alt="image" src="https://github.com/user-attachments/assets/c5e77540-e3a3-48d9-8c94-afbbb61064a0" />
