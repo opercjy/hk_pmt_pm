@@ -1,57 +1,38 @@
 {
-  "_comment": "This is the main configuration file for the monitoring application.",
-
   "arduino_settings": {
-    "_comment": "Settings for the Arduino board reading DHT22 sensors. The order in this list is important and must match the DHT_PINS array in the Arduino sketch.",
+    "_comment": "리눅스 환경에서 포트 이름 확인: 터미널에 'dmesg | grep tty' 또는 'ls /dev/tty*' 입력. 정품 Arduino Uno는 보통 /dev/ttyACM0, CH340 칩셋 호환 보드는 /dev/ttyUSB0 으로 인식됩니다.",
     "port": "/dev/ttyUSB0",
     "baud_rate": 9600,
     "sensors": [
-      {
-        "pin": 2,
-        "name": "Internal Ambient",
-        "_comment": "Data index 0. Corresponds to the first pin in the Arduino's DHT_PINS array."
-      },
-      {
-        "pin": 3,
-        "name": "External Ambient",
-        "_comment": "Data index 1. Corresponds to the second pin."
-      },
-      {
-        "pin": 4,
-        "name": "Rack Front",
-        "_comment": "Data index 2. Corresponds to the third pin."
-      },
-      {
-        "pin": 5,
-        "name": "Rack Rear",
-        "_comment": "Data index 3. Corresponds to the fourth pin."
-      }
+      { "pin": 2, "name": "Internal Ambient" },
+      { "pin": 3, "name": "External Ambient" },
+      { "pin": 4, "name": "Rack Front" },
+      { "pin": 5, "name": "Rack Rear" }
     ]
   },
-
   "caen_hv_settings": {
-    "_comment_link_type": "Connection method. Use 'TCPIP' for network or 'USB' for direct connection.",
     "link_type": "TCPIP",
-
-    "_comment_connection_arg": "For TCPIP, this is the IP address. For USB, this is the device link number (usually '0').",
     "connection_argument": "192.168.0.20",
-    
     "system_type": "SMARTHV",
     "username": "user",
     "password": "password",
-    "channels_to_monitor": [0, 1, 2, 3, 4, 5, 6, 7]
+    "channels_to_monitor": [0, 1, 2, 3, 4, 5, 6, 7],
+    "parameters": {
+      "v_mon": "VMon",
+      "i_mon": "IMon",
+      "v_set": "VSet",
+      "i_set": "ISet",
+      "pw": "Pw",
+      "status": "ChStatus"
+    }
   },
-
   "ui_options": {
-    "_comment": "Settings for the graphical user interface.",
-    "window_title": "Real-time T/H and HV Monitoring (Configurable)",
+    "window_title": "Real-time Monitoring System (Refactored)",
     "shifter_name": "Jiyoung Choi (Chonnam Nat'l Univ.)",
     "indicator_update_interval_ms": 2000,
     "graph_update_interval_ms": 60000
   },
-
   "logging_options": {
-    "_comment": "Settings for data logging to the CSV file.",
     "log_file_prefix": "monitoring_log",
     "capture_interval_ms": 60000,
     "bulk_write_interval_ms": 1800000
