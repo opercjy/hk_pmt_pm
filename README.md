@@ -1,112 +1,109 @@
-# 실시간 환경 및 고전압(HV) 모니터링 및 제어 시스템
+### **`README.md` (v2.0)**
 
-## 1. 프로젝트 개요
+새로운 모듈식 구조와 사용법을 반영한 README 파일입니다.
 
-본 프로젝트는 아두이노에 연결된 다수의 DHT22 온/습도 센서와 다양한 CAEN HV 전원 공급 장치(SMARTHV, SY4527/SY5527, N1470 등)의 상태를 실시간으로 모니터링하고, 원격으로 제어하며, 모든 데이터를 장기간 CSV 파일로 기록하는 Python 기반 GUI 애플리케이션입니다.
-실험 환경의 안정성을 지속적으로 확인하고, 필요시 즉각적으로 HV 채널을 제어할 수 있도록 설계되었습니다. 모든 설정은 `config.json` 파일을 통해 관리되므로, 코드 수정 없이 다양한 하드웨어 구성에 유연하게 대응할 수 있습니다.
+-----
 
-## 2. 주요 기능
+# 실시간 환경 및 고전압(HV) 모니터링 시스템 v2.0
 
-* **다중 장비 지원**: `config.json` 설정을 통해 **SMARTHV**, **SY4527/SY5527**, **NIM/Desktop 모듈 (예: N1470)** 등 다양한 CAEN HV 시스템을 지원합니다.
-* **실시간 데이터 모니터링**: 다중 DHT22 센서의 온도/습도 및 CAEN HV 채널의 전압/전류 값을 실시간으로 UI에 표시합니다.
-* **데이터 시각화**: `PyQtGraph`를 이용한 4분할 그래프(온도, 습도, HV 전압, HV 전류)를 제공하며, 모든 센서와 채널은 개별 색상으로 표시됩니다.
-* **원격 HV 제어**: 별도의 제어판(Control Panel) 창을 통해 개별 채널의 전압/전류 설정 및 ON/OFF 제어가 가능하여, GECO2020과 같은 공식 프로그램의 점유 없이 직접 장비를 제어할 수 있습니다.
-* **장기간 데이터 로깅**: 1분마다 수집된 데이터를 메모리 버퍼에 저장 후, 30분 주기로 CSV 파일에 일괄 기록하여 시스템 부하를 최소화합니다.
-* **유연한 설정 관리**: `config.json` 파일을 통해 아두이노 포트, 센서 목록, HV 연결 방식(TCPIP/USB) 및 주소 등 모든 주요 설정을 관리합니다.
-* **안정적인 멀티스레딩**: Arduino, CAEN HV 통신 및 GUI를 각각 별도의 스레드로 분리하여 장시간 안정적인 동작을 보장합니다.
+## 1\. 프로젝트 개요
 
-## 3. 시스템 아키텍처
+본 프로젝트는 실험실 환경의 물리적 조건(온/습도)과 CAEN 고전압(HV) 장비의 상태를 실시간으로 통합 모니터링하고 원격으로 제어하기 위한 Python 기반 GUI 애플리케이션입니다.
 
--   **`monitoring_app.py`**: PyQt5 기반의 메인 애플리케이션으로, GUI와 전체 로직을 담당합니다.
--   **`N1470_monitoring_app.py`**: N1470과 같이 전류 파라미터 이름이 다른 모델을 위한 특화 버전 스크립트입니다.
--   **`hv_diagnostic.py`**: HV 장비에 연결하여 사용 가능한 파라미터 목록을 출력해주는 진단 도구입니다. 이를 통해 `monitoring_app.py` 코드의 파라미터 이름(`VMon`, `IMon` 등)을 검증하고 수정할 수 있습니다.
--   **`config.json`**: 모든 하드웨어 및 프로그램 설정을 담고 있는 중앙 설정 파일입니다.
--   **Arduino**: `multi_sensor_sketch.ino` 스케치가 업로드되어, DHT22 센서 데이터를 주기적으로 읽어 시리얼 통신으로 전송합니다.
+v2.0은 대대적인 리팩토링을 통해 **모듈식 아키텍처**를 도입하여, 향후 새로운 하드웨어를 추가하거나 기능을 확장하기 매우 용이한 구조로 개선되었습니다. 모든 설정은 `config.json` 파일을 통해 관리되므로, 코드 수정 없이 다양한 하드웨어 구성에 유연하게 대응할 수 있습니다.
 
-## 4. 사전 요구사항
+## 2\. 핵심 기능
 
-**설치 순서가 중요합니다.**
+  * **모듈식 아키텍처**: GUI, 백그라운드 작업, 데이터 관리가 명확히 분리되어 유지보수성 및 확장성 극대화
+  * **동적 하드웨어 지원**: `config.json` 설정 변경만으로 `SMARTHV`, `N1470` 등 다양한 CAEN 장비와 포트가 다른 Arduino 보드 지원
+  * **안정적인 멀티스레딩**: 하드웨어 통신은 별도의 스레드에서 처리되어 GUI의 응답성을 보장하며 장시간 안정적으로 동작
+  * **실시간 시각화**: `PyQtGraph`를 이용해 모든 센서 및 HV 채널 데이터를 실시간 그래프로 시각화
+  * **원격 HV 제어**: GUI 제어판을 통해 각 HV 채널의 전압/전류 설정 및 전원 ON/OFF 원격 제어
+  * **사용자 편의 도구**: Arduino 시리얼 포트를 자동으로 찾아주는 `find_arduino_port.py` 유틸리티 제공
 
-1.  **기본 프로그램 설치**
-    -   Python 3.x
-    -   Arduino IDE
+## 3\. 시스템 아키텍처 (논리 제어 흐름)
 
-2.  **CAEN HV C/C++ Wrapper Library 설치 (필수)**
-    -   [CAEN 공식 홈페이지](https://www.caen.it/products/caen-hv-wrapper-library/)에 접속하여 사용하는 운영체제(예: Linux 64bit)에 맞는 버전을 다운로드합니다.
-    -   다운로드한 파일의 압축을 풀고, 내부의 `install.sh` 스크립트나 매뉴얼을 따라 시스템에 C/C++ 라이브러리를 설치합니다.
+본 시스템은 각자 명확한 책임을 가진 여러 모듈이 유기적으로 상호작용하는 구조로 설계되었습니다.
 
-3.  **Python 라이브러리 설치**
-    -   필수 라이브러리를 pip을 통해 설치합니다.
-        ```bash
-        pip install pyqt5 pyqtgraph pyserial numpy caen-libs
-        ```
+```
+[하드웨어] <------> [workers.py] <------> [worker_manager.py] <------> [main_app.py (GUI)]
+ (Arduino,                               (하드웨어 통신 전문가)         (백그라운드 작업 총괄)          (최종 사용자 인터페이스)
+ CAEN HV)
+```
 
-4.  **리눅스 시스템 라이브러리 설치**
-    -   (Rocky Linux 9 기준) OpenSSL 1.1.1 호환성 라이브러리를 설치합니다.
-        ```bash
-        sudo dnf install openssl1.1
-        ```
+  * **`config.json` (프로젝트의 두뇌)**
 
-## 5. 설치 및 사용법
+      * 모든 하드웨어 연결 정보, 장비별 파라미터 이름, UI 옵션 등 프로젝트의 모든 동작 방식을 정의하는 중앙 설정 파일입니다.
 
-**1단계: 사용자 권한 설정 (최초 1회)**
+  * **`workers.py` (하드웨어 통신 전문가)**
 
-리눅스에서 USB 시리얼 포트(`/dev/ttyUSB0` 등)에 접근하려면 사용자 계정을 `dialout` 그룹에 추가해야 합니다. 터미널에서 아래 명령어를 실행하고 **시스템을 재부팅하거나 로그아웃 후 다시 로그인**하세요.
+      * `ArduinoWorker`: 아두이노와 시리얼 통신을 담당합니다.
+      * `CaenHvWorker`: CAEN HV 장비와 TCPIP/USB 통신을 담당하며, `config.json`에 정의된 파라미터 이름을 동적으로 사용합니다.
+
+  * **`worker_manager.py` (백그라운드 작업 총괄)**
+
+      * 모든 `Worker`들을 `QThread`(백그라운드 스레드)에서 생성, 실행, 안전하게 종료하는 모든 생명주기를 관리합니다.
+      * GUI(`main_app.py`)와 `Worker`들 사이의 통신을 중계하여, GUI가 스레드 관리의 복잡성을 전혀 알 필요가 없도록 추상화합니다.
+
+  * **`main_app.py` (최종 지휘자 및 GUI)**
+
+      * `MonitoringApp` 메인 윈도우를 생성하고 사용자에게 보여주는 최종 결과물입니다.
+      * `WorkerManager`를 통해 백그라운드 작업을 시작/종료시키고, 전달받은 데이터를 UI에 표시하는 역할만 수행합니다.
+
+## 4\. 사전 요구사항
+
+  * Python 3.x
+  * Arduino IDE
+  * [CAEN HV C/C++ Wrapper Library](https://www.caen.it/products/caen-hv-wrapper-library/): 사용하는 운영체제에 맞게 **반드시 먼저 설치**해야 합니다.
+
+## 5\. 설치 및 사용법
+
+**1단계: 사용자 권한 설정 (리눅스 최초 1회)**
+USB 시리얼 포트 접근을 위해 현재 사용자를 `dialout` 그룹에 추가합니다. **명령어 실행 후 반드시 재부팅 또는 재로그인**해야 합니다.
 
 ```bash
 sudo usermod -a -G dialout $USER
-````
-
-**2단계: 하드웨어 연결**
-
-  - `config.json`의 `"sensors"` 목록에 맞게 DHT22 센서들을 아두이노의 디지털 핀에 연결합니다.
-
-**3단계: 아두이노 스케치 업로드**
-
-1.  Arduino IDE를 엽니다.
-2.  `arduino_sketch/multi_sensor_sketch.ino` 파일을 엽니다.
-3.  스케치 상단의 `DHT_PINS` 배열이 `config.json`의 센서 핀 구성과 일치하는지 확인 후 업로드합니다.
-
-**4단계: 설정 파일 구성 (`config.json`)**
-
-1.  사용할 장비에 맞는 `monitoring_app.py` 또는 `N1470_monitoring_app.py` 스크립트와 동일한 위치에 `config.json` 파일이 있는지 확인합니다.
-2.  `"arduino_settings"` 섹션에서 `"port"`를 자신의 환경에 맞는 아두이노 시리얼 포트 이름으로 수정합니다.
-3.  `"caen_hv_settings"` 섹션을 자신의 HV 장비에 맞게 수정합니다.
-      - **`system_type`**: `SMARTHV`, `SY4527`, `SY5527`, `N1470` 등 장비 모델명을 정확히 기입합니다.
-      - **`link_type`**: `TCPIP` 또는 `USB`
-      - **`connection_argument`**:
-          - `TCPIP` (SMARTHV, SY4527/5527): `"192.168.0.20"` (IP 주소만 입력)
-          - `TCPIP` (NIM/Desktop, 예: N1470): `"192.168.0.250"` (`system_type`을 정확히 명시하면 LBus 주소는 라이브러리가 자동으로 인식하므로 생략 가능합니다.)
-          - `USB`: `"0"` (장치 번호)
-
-**5단계: (선택사항) HV 파라미터 진단**
-
-만약 모니터링/제어 시 `Parameter not found` 오류가 발생하면, `hv_diagnostic.py`를 실행하여 장비가 실제로 사용하는 파라미터 이름을 확인하세요.
-
-```bash
-python3 hv_diagnostic.py
 ```
 
-진단 결과에 나온 파라미터 목록을 참고하여 메인 스크립트(`CaenHvWorker` 클래스 내부)의 `get_ch_param` 또는 `set_ch_param`에 사용된 파라미터 이름(`VMon`, `IMon`, `VSet`, `ISet` 등)을 수정해야 할 수 있습니다.
+**2단계: Python 라이브러리 설치**
+프로젝트 폴더 내의 터미널에서 아래 명령어를 실행하여 필요한 모든 라이브러리를 한 번에 설치합니다.
 
-**6단계: 애플리케이션 실행**
+```bash
+pip install -r requirements.txt
+```
 
-  - 터미널에서 아래 명령어를 실행하여 모니터링 프로그램을 시작합니다.
-    ```bash
-    python3 monitoring_app.py
-    ```
+**3단계: 아두이노 설정**
+
+1.  `arduino_sketch/multi_sensor_sketch.ino` 파일을 Arduino IDE로 열어 보드에 업로드합니다.
+2.  터미널에서 `python3 find_arduino_port.py`를 실행하여 내 아두이노의 정확한 포트 이름(예: `/dev/ttyACM0`)을 확인합니다.
+
+**4단계: `config.json` 설정**
+
+1.  `config.json` (SMARTHV, SY 계열용) 또는 `config_n1470.json` (N1470용) 파일을 복사하여 `my_config.json`과 같이 나만의 설정 파일을 만듭니다.
+2.  `find_arduino_port.py`로 찾은 포트 이름을 `arduino_settings`의 `port` 값에 입력합니다.
+3.  `caen_hv_settings` 섹션을 사용하는 HV 장비 정보에 맞게 수정합니다. (IP 주소, `system_type`, 채널 수 등)
+
+**5단계: 프로그램 실행**
+터미널에서 아래 명령어를 실행하여 모니터링 프로그램을 시작합니다. `my_config.json` 부분은 4단계에서 만든 설정 파일 이름으로 변경합니다.
+
+```bash
+python3 main_app.py my_config.json
+```
+
+(만약 파일 이름을 지정하지 않으면 기본값으로 `config.json`을 사용합니다.)
 
 ## 6\. 파일 구조
 
 ```
 .
-├── N1470_LBus/
-│   ├── monitoring_app_n1470.py # N1470 특화 버전 스크립트
-│   └── config.json             # N1470용 설정 파일
-├── monitoring_app.py           # SMARTHV, SY4527/5527용 메인 스크립트
-├── hv_diagnostic.py            # HV 파라미터 진단 스크립트
-├── config.json                 # 메인 스크립트용 설정 파일
+├── main_app.py                 # 메인 애플리케이션 실행 파일
+├── worker_manager.py           # 백그라운드 스레드 관리 모듈
+├── workers.py                  # 실제 하드웨어 통신 로직 모듈
+├── find_arduino_port.py        # 아두이노 포트 자동 탐지 유틸리티
+├── config.json                 # 기본 설정 파일 (SMARTHV, SY 계열)
+├── config_n1470.json           # N1470 장비용 설정 파일 예시
+├── requirements.txt            # Python 라이브러리 목록
 ├── arduino_sketch/
-│   └── multi_sensor_sketch.ino # 아두이노에 업로드할 스케치
+│   └── multi_sensor_sketch.ino # 아두이노 업로드용 스케치
 └── README.md                   # 프로젝트 설명 파일
 ```
