@@ -1,17 +1,13 @@
 {
   "arduino_settings": {
-    "_comment": "리눅스 환경에서 포트 이름 확인: 터미널에 'dmesg | grep tty' 또는 'ls /dev/tty*' 입력. 정품 Arduino Uno는 보통 /dev/ttyACM0, CH340 칩셋 호환 보드는 /dev/ttyUSB0 으로 인식됩니다.",
-    "port": "/dev/ttyUSB0",
+    "port": "/dev/ttyACM0",
     "baud_rate": 9600,
     "sensors": [
-    	{ "pin": 2, "name": "Internal Ambient", "_comment": "Data index 0. Corresponds to the first pin in the Arduino's DHT_PINS array."
-	    },
-	    { "pin": 3, "name": "External Ambient", "_comment": "Data index 1. Corresponds to the second pin."
-	    },
-	    { "pin": 4, "name": "Rack Front", "_comment": "Data index 2. Corresponds to the third pin" 
-	    },									        { "pin": 5, "name": "Rack Rear",  "_comment": "Data index 3. Corresponds to the fourth pin."
-	    }
-	  ]
+      { "pin": 2, "name": "Internal Ambient" },
+      { "pin": 3, "name": "External Ambient" },
+      { "pin": 4, "name": "Rack Front" },
+      { "pin": 5, "name": "Rack Rear" }
+    ]
   },
   "caen_hv_settings": {
     "system_type": "N1470",
@@ -24,13 +20,14 @@
       "v_mon": "VMon",
       "i_mon_low": "IMonL",
       "i_mon_high": "IMonH",
-      "v_set": "V0Set",
-      "i_set": "I0Set",
+      "v_set": "VSet",
+      "i_set": "ISet",
       "pw": "Pw"
     }
   },
   "ui_options": {
-    "window_title": "Real-time Monitoring System v2.3"
+    "window_title": "Real-time Monitoring System v2.6 (Stable)",
+    "shifter_name": "Jiyoung Choi (Chonnam Nat'l Univ.)"
   },
   "ui_styles": {
     "background_color": "#FFF8DC",

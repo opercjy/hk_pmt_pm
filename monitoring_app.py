@@ -8,7 +8,6 @@ import numpy as np
 from worker_manager import WorkerManager
 from database_manager import DatabaseManager
 
-# HVControlPanel class (변경 없음)
 class HVControlPanel(QDialog):
     control_signal = pyqtSignal(str, int, int, str, object)
     def __init__(self, channels, hv_params, styles, parent=None):
@@ -174,8 +173,7 @@ class MonitoringApp(QMainWindow):
             else: self.hv_labels[ch]['i'].setText(f"{data.get('i', 0):.4f}")
 
     def update_graphs(self):
-        ts = time.time(); self.graph_data['time'].append(ts)
-        max_points = 1440 
+        ts = time.time(); self.graph_data['time'].append(ts); max_points = 1440 
         if len(self.graph_data['time']) > max_points: self.graph_data['time'].pop(0)
         for i, s_info in enumerate(self.config['arduino_settings']['sensors']):
             data = self.latest_data['sensors'].get(i, {'t': np.nan, 'h': np.nan})
@@ -194,6 +192,7 @@ class MonitoringApp(QMainWindow):
             self.monitor_curves['curr'][ch].setData(self.graph_data['time'], curr_list, connect='finite')
 
     def capture_data_point(self):
+        if self._is_closing: return
         data_point = {'ts': datetime.now().isoformat(), 'sensors': self.latest_data['sensors'].copy(), 'hv': self.latest_data['hv'].copy()}
         self.db_manager.log_data(data_point)
         cursor = self.db_manager.conn.cursor(); cursor.execute("SELECT COUNT(*) FROM monitoring_data"); count = cursor.fetchone()[0]
@@ -246,7 +245,9 @@ class MonitoringApp(QMainWindow):
         if self._is_closing: event.accept(); return
         print("Close button pressed. Initiating shutdown...")
         self._is_closing = True; event.ignore(); self.setEnabled(False)
-        self.db_manager.close(); self.worker_manager.initiate_shutdown()
+        for timer in [self.indicator_timer, self.capture_timer, self.graph_timer, self.datetime_timer]: timer.stop()
+        self.db_manager.close()
+        self.worker_manager.initiate_shutdown()
 
 def load_config(config_file):
     with open(config_file, 'r', encoding='utf-8') as f: return json.load(f)
@@ -254,7 +255,7 @@ def load_config(config_file):
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     app = QApplication(sys.argv)
-    default_config = 'config_N1470.json'
+    default_config = 'config_n1470.json'
     config_file = sys.argv[1] if len(sys.argv) > 1 else default_config
     if not os.path.exists(config_file): print(f"Error: Config file '{config_file}' not found."); sys.exit(1)
     config = load_config(config_file)
