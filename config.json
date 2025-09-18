@@ -30,11 +30,12 @@
     "system_type": "SMARTHV",
     "link_type": "TCPIP",
     "connection_argument": "192.168.0.250",
-    "username": "user",
-    "password": "password",
+    "username": "admin",
+    "password": "admin",
     "channels_to_monitor": [0, 1, 2, 3, 4, 5, 6, 7],
     "parameters": {
       "v_mon": "VMon",
+      "i_mon": "IMon",
       "v_set": "VSet",
       "i_set": "ISet",
       "pw": "Pw"
