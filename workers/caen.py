@@ -17,60 +17,42 @@ class CaenHvWorker(QObject):
         self.device = None
         self.hv = None
         
-        self.poll_timer = QTimer(self)
-        self.poll_timer.timeout.connect(self._poll_hv_data)
-        
-        self.connect_timer = QTimer(self)
-        self.connect_timer.timeout.connect(self._try_to_connect)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._do_work)
 
     def run(self):
-        # Thread starts, immediately start trying to connect
-        self.connect_timer.start(1000) # Try to connect every 1 second
+        # This method is called when the thread starts.
+        # It just starts the main timer.
+        self.timer.start(2000) # Start the work loop, try/poll every 2 seconds
 
     def stop_polling(self):
-        self.poll_timer.stop()
-        self.connect_timer.stop()
+        self.timer.stop()
         if self.device:
             try:
                 self.device.close()
-            except self.hv.Error:
-                pass # Ignore errors on close
+            except: # Ignore errors on close
+                pass
             self.device = None
         print("CAEN HV polling stopped.")
 
-    def _try_to_connect(self):
+    def _do_work(self):
         try:
-            if not self.hv:
-                from caen_libs import caenhvwrapper
-                self.hv = caenhvwrapper
-            
-            cfg = self.config
-            system_type = self.hv.SystemType[cfg['system_type']]
-            link_type = self.hv.LinkType[cfg['link_type']]
-            
-            self.connection_status.emit(f"Connecting to HV ({cfg.get('connection_argument', '')})...")
-            self.device = self.hv.Device.open(system_type, link_type, cfg.get('connection_argument', ''), cfg.get('username', ''), cfg.get('password', ''))
-            
-            # If connection succeeds:
-            self.connect_timer.stop()
-            self.connection_status.emit("HV Status: Connection Successful!")
-            self.poll_timer.start(1000) # Start polling every 1 second
+            # If not connected, try to connect first.
+            if self.device is None:
+                if not self.hv:
+                    from caen_libs import caenhvwrapper
+                    self.hv = caenhvwrapper
+                
+                cfg = self.config
+                system_type = self.hv.SystemType[cfg['system_type']]
+                link_type = self.hv.LinkType[cfg['link_type']]
+                
+                self.connection_status.emit(f"Connecting to HV ({cfg.get('connection_argument', '')})...")
+                self.device = self.hv.Device.open(system_type, link_type, cfg.get('connection_argument', ''), cfg.get('username', ''), cfg.get('password', ''))
+                self.connection_status.emit("HV Status: Connection Successful!")
 
-        except self.hv.Error as e:
-            self.connection_status.emit(f"HV Status: Connection Failed! Retrying...")
-            if self.device:
-                self.device.close()
-                self.device = None
-            # The connect_timer is still running, so it will try again automatically
-        except (ImportError, KeyError) as e:
-            self.connection_status.emit(f"HV Library/Config Error: {e}")
-            self.connect_timer.stop() # Stop trying if config is wrong
-
-    def _poll_hv_data(self):
-        if not self.device:
-            return
-
-        try:
+            # --- If connected, process queue and poll data ---
+            
             # 1. Process command queue
             try:
                 cmd = self.command_queue.get_nowait()
@@ -102,10 +84,11 @@ class CaenHvWorker(QObject):
             self.data_ready.emit(results)
 
         except self.hv.Error as e:
-            self.connection_status.emit(f"HV poll failed: {e}. Reconnecting...")
-            self.poll_timer.stop()
+            self.connection_status.emit(f"HV Status: Connection Failed. Retrying...")
             if self.device:
                 try: self.device.close()
                 except self.hv.Error: pass
-                self.device = None
-            self.connect_timer.start(5000) # Try to reconnect after 5 seconds
+            self.device = None # Set to None to trigger reconnect on next timer tick
+        except Exception as e:
+            self.connection_status.emit(f"Worker Error: {e}")
+            self.timer.stop() # Stop on unexpected errors
