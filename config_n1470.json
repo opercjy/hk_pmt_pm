@@ -13,8 +13,6 @@
     "system_type": "N1470",
     "link_type": "TCPIP",
     "connection_argument": "192.168.0.250",
-    "username": "user",
-    "password": "password",
     "channels_to_monitor": [0, 1, 2, 3],
     "parameters": {
       "v_mon": "VMon",
