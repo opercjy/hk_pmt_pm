@@ -81,7 +81,7 @@ python3 monitoring_app.py config.json
 │   ├── __init__.py
 │   ├── arduino.py              # Arduino 통신 스레드 워커
 │   └── caen_process.py         # CAEN 통신 독립 프로세스 워커
-├── utils/
+├── util/
 │   ├── find_arduino_port.py    # 아두이노 포트 자동 탐지 유틸리티
 │   └── hv_advanced_diagnostic.py # CAEN 파라미터 고급 진단 유틸리티
 ├── config.json                 # 기본 설정 파일
