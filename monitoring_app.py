@@ -1,457 +1,212 @@
-# -*- coding: utf-8 -*-
-"""
-실시간 환경(온/습도) 및 고전압(HV) 모니터링 및 제어 시스템
-
-- 작성자: 최지영 (전남대학교)
-- 최종 수정일: 2025-09-11
-- 기능:
-    - 다중 DHT22 센서 및 CAEN SMARTHV 모니터링
-    - 실시간 데이터 시각화 (PyQtGraph)
-    - 원격 HV 제어 기능 (전압/전류/전원)
-    - 장기간 데이터 로깅 (CSV)
-    - 모든 설정을 config.json 파일로 관리
-"""
-
-# --- 1. 라이브러리 임포트 ---
-import sys, serial, time, csv, json, os, queue
+import sys, json, os, time, csv
 from datetime import datetime
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QGridLayout, QLabel, QFrame, QPushButton, QDialog, QComboBox, QDoubleSpinBox
-from PyQt5.QtCore import QThread, QObject, pyqtSignal, QTimer, Qt
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QGridLayout, QLabel, QPushButton, QDialog, QComboBox, QDoubleSpinBox
+from PyQt5.QtCore import QTimer, Qt, pyqtSignal
 from PyQt5.QtGui import QFont
-
-# pyqtgraph: 그래프 시각화를 위한 라이브러리
 import pyqtgraph as pg
-# numpy: 과학 계산용 라이브러리, 여기서는 NaN(Not a Number) 값을 사용하기 위해 임포트
 import numpy as np
+from worker_manager import WorkerManager
 
-# pyqtgraph의 전역 스타일 설정
-pg.setConfigOption('background', '#FFF8DC') # 그래프 배경색을 Cornsilk(밝은 베이지)으로 설정
-pg.setConfigOption('foreground', 'k')      # 그래프 전경색(축, 라벨 등)을 검은색으로 설정
+pg.setConfigOption('background', '#FFF8DC')
+pg.setConfigOption('foreground', 'k')
 
-# --- 2. 설정 파일 로드 ---
-def load_config(filename='config.json'):
-    """스크립트와 동일한 경로에 있는 JSON 설정 파일을 읽어오는 함수"""
-    if not os.path.exists(filename):
-        raise FileNotFoundError(f"설정 파일 '{filename}'을 찾을 수 없습니다.")
-    with open(filename, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-# 스크립트 시작 시 설정 파일을 전역 변수 CONFIG에 저장
-try:
-    CONFIG = load_config()
-except Exception as e:
-    print(f"config.json 파일 로드 오류: {e}")
-    sys.exit(1)
-
-# --- 3. 워커 클래스 정의 ---
-# GUI의 응답성을 유지하기 위해, 시간이 오래 걸리는 I/O 작업을 별도의 스레드에서 처리
-
-class ArduinoWorker(QObject):
-    """별도의 스레드에서 아두이노와의 시리얼 통신을 담당하는 클래스"""
-    # 데이터 수신 시 발생시킬 신호. (센서 인덱스, 온도, 습도)를 메인 스레드로 전달
-    data_ready = pyqtSignal(int, object, object)
-    # 연결 상태 변경 시 발생시킬 신호. (상태 메시지)를 전달
-    connection_status = pyqtSignal(str) 
-    
-    def __init__(self, port, baud_rate):
-        super().__init__()
-        self.running = True
-        self.ser = None
-        self.port = port
-        self.baud_rate = baud_rate
-    
-    def run(self):
-        """스레드가 시작될 때 실행되는 메인 루프"""
-        while self.running:
-            try:
-                self.connection_status.emit(f"Connecting to ENV Sensor ({self.port})...")
-                self.ser = serial.Serial(self.port, self.baud_rate, timeout=2)
-                self.connection_status.emit("ENV Status: Connection Successful!")
-                
-                # 연결이 성공하면 프로그램이 종료될 때까지 계속해서 데이터 읽기 시도
-                while self.running:
-                    if self.ser.in_waiting > 0:
-                        line = self.ser.readline().decode('utf-8').strip()
-                        try:
-                            # "SENSOR:0,TEMP:22.5,HUMI:45.8" 형식의 문자열을 딕셔너리로 파싱
-                            parts = {p.split(':')[0]: p.split(':')[1] for p in line.split(',')}
-                            idx = int(parts.get("SENSOR", -1))
-                            if idx != -1: # 유효한 센서 인덱스가 있을 경우
-                                if "ERROR" in parts:
-                                    self.data_ready.emit(idx, None, None) # 오류 발생 시 None 전달
-                                elif "TEMP" in parts and "HUMI" in parts:
-                                    self.data_ready.emit(idx, float(parts["TEMP"]), float(parts["HUMI"]))
-                        except (ValueError, IndexError, KeyError):
-                            pass # 파싱 실패 시 조용히 무시하여 프로그램 안정성 확보
-            except serial.SerialException:
-                # 연결 실패 시 상태 업데이트 후 5초 대기 후 재시도
-                self.connection_status.emit(f"ENV Status: Connection Failed!")
-                time.sleep(5)
-            finally:
-                # 루프 종료 또는 예외 발생 시 시리얼 포트를 안전하게 닫음
-                if self.ser and self.ser.is_open:
-                    self.ser.close()
-    
-    def stop(self):
-        """메인 프로그램 종료 시 스레드를 안전하게 중지시키기 위한 함수"""
-        self.running = False
-
-class CaenHvWorker(QObject):
-    """별도의 스레드에서 HV 장비와의 통신 및 제어를 담당하는 클래스"""
-    data_ready = pyqtSignal(list)
-    connection_status = pyqtSignal(str)
-    command_feedback = pyqtSignal(str) # 제어 명령 결과 피드백을 위한 신호
-
-    def __init__(self, config):
-        super().__init__()
-        self.running = True
-        self.config = config
-        self.command_queue = queue.Queue() # 스레드 간의 안전한 통신을 위한 명령 큐
-
-    def run(self):
-        cfg = self.config
-        try:
-            # HV 라이브러리는 스레드 내에서 import하여 안정성 확보
-            from caen_libs import caenhvwrapper as hv
-            system_type = hv.SystemType[cfg['system_type']]
-            link_type = hv.LinkType[cfg['link_type']]
-            channels = cfg['channels_to_monitor']
-            
-            while self.running:
-                try:
-                    self.connection_status.emit(f"Connecting to HV ({cfg['connection_argument']})...")
-                    # 'with' 구문을 사용하여 장비 연결 및 자동 해제 (리소스 관리 용이)
-                    with hv.Device.open(system_type, link_type, cfg['connection_argument'], cfg['username'], cfg['password']) as device:
-                        self.connection_status.emit("HV Status: Connection Successful!")
-                        while self.running:
-                            # 1. 제어 명령 큐 확인 및 처리
-                            try:
-                                # 큐에서 명령을 논블로킹 방식으로 가져옴
-                                command = self.command_queue.get_nowait()
-                                _, slot, ch, param, value = command
-                                device.set_ch_param(slot, [ch], param, value)
-                                self.command_feedback.emit(f"Success: Ch{ch} {param} set to {value}")
-                            except queue.Empty:
-                                pass # 큐가 비어있으면 통과
-                            except hv.Error as e:
-                                self.command_feedback.emit(f"Error on Ch{ch} {param}: {e}")
-                            
-                            # 2. 실시간 값 모니터링
-                            results = []
-                            for ch_mon in channels:
-                                try:
-                                    vmon = device.get_ch_param(0, [ch_mon], 'VMon')[0]
-                                    imon = device.get_ch_param(0, [ch_mon], 'IMon')[0]
-                                    results.append((0, ch_mon, vmon, imon))
-                                except hv.Error:
-                                    results.append((0, ch_mon, 0.0, 0.0))
-                            self.data_ready.emit(results)
-                            time.sleep(1) # 1초 간격으로 모니터링
-                except hv.Error as e:
-                    self.connection_status.emit(f"HV Status: Connection Failed!")
-                    time.sleep(10)
-        except (ImportError, KeyError) as e:
-            self.connection_status.emit(f"HV Library/Config Error: {e}")
-
-    def stop(self):
-        self.running = False
-
-# --- 4. HV 제어판 GUI 클래스 ---
 class HVControlPanel(QDialog):
-    """HV 채널 제어를 위한 별도의 QDialog(팝업) 창"""
-    control_signal = pyqtSignal(tuple)
+    control_signal = pyqtSignal(str, int, int, str, object)
 
-    def __init__(self, channels_to_monitor, parent=None):
+    def __init__(self, channels, hv_params, parent=None):
         super().__init__(parent)
         self.setWindowTitle("HV Control Panel")
+        self.hv_params = hv_params
         self.layout = QGridLayout(self)
         
-        # UI 위젯 생성 (라벨, 콤보박스, 스핀박스, 버튼 등)
-        self.layout.addWidget(QLabel("Target Channel:"), 0, 0)
         self.channel_selector = QComboBox()
-        self.channel_selector.addItems([str(ch) for ch in channels_to_monitor])
-        self.layout.addWidget(self.channel_selector, 0, 1, 1, 2)
+        self.channel_selector.addItems([str(ch) for ch in channels])
+        self.voltage_input = QDoubleSpinBox(); self.voltage_input.setRange(0, 8000)
+        self.current_input = QDoubleSpinBox(); self.current_input.setRange(0, 1000)
+        self.set_voltage_btn = QPushButton("Set Voltage")
+        self.set_current_btn = QPushButton("Set Current")
+        self.power_on_btn = QPushButton("Turn ON")
+        self.power_off_btn = QPushButton("Turn OFF")
+        self.feedback_label = QLabel("Status: Ready")
 
-        self.layout.addWidget(QLabel("Set Voltage (VSet):"), 1, 0)
-        self.voltage_input = QDoubleSpinBox(); self.voltage_input.setRange(0, 8000); self.voltage_input.setDecimals(2)
-        self.layout.addWidget(self.voltage_input, 1, 1)
-        self.set_voltage_btn = QPushButton("Set Voltage"); self.set_voltage_btn.clicked.connect(self.set_voltage)
-        self.layout.addWidget(self.set_voltage_btn, 1, 2)
-        
-        self.layout.addWidget(QLabel("Set Current (ISet, uA):"), 2, 0)
-        self.current_input = QDoubleSpinBox(); self.current_input.setRange(0, 1000); self.current_input.setDecimals(2)
-        self.layout.addWidget(self.current_input, 2, 1)
-        self.set_current_btn = QPushButton("Set Current"); self.set_current_btn.clicked.connect(self.set_current)
-        self.layout.addWidget(self.set_current_btn, 2, 2)
-
-        self.power_on_btn = QPushButton("Turn ON"); self.power_on_btn.setStyleSheet("background-color: lightgreen")
-        self.power_on_btn.clicked.connect(self.turn_on)
-        self.layout.addWidget(self.power_on_btn, 3, 0, 1, 3)
-
-        self.power_off_btn = QPushButton("Turn OFF"); self.power_off_btn.setStyleSheet("background-color: lightcoral")
-        self.power_off_btn.clicked.connect(self.turn_off)
-        self.layout.addWidget(self.power_off_btn, 4, 0, 1, 3)
-        
-        self.feedback_label = QLabel("Status: Ready"); self.feedback_label.setWordWrap(True)
+        self.layout.addWidget(QLabel("Target Channel:"), 0, 0); self.layout.addWidget(self.channel_selector, 0, 1, 1, 2)
+        self.layout.addWidget(QLabel("Set Voltage (V):"), 1, 0); self.layout.addWidget(self.voltage_input, 1, 1); self.layout.addWidget(self.set_voltage_btn, 1, 2)
+        self.layout.addWidget(QLabel("Set Current (uA):"), 2, 0); self.layout.addWidget(self.current_input, 2, 1); self.layout.addWidget(self.set_current_btn, 2, 2)
+        self.layout.addWidget(self.power_on_btn, 3, 0, 1, 3); self.layout.addWidget(self.power_off_btn, 4, 0, 1, 3)
         self.layout.addWidget(self.feedback_label, 5, 0, 1, 3)
+        
+        self.set_voltage_btn.clicked.connect(self.set_voltage)
+        self.set_current_btn.clicked.connect(self.set_current)
+        self.power_on_btn.clicked.connect(self.turn_on)
+        self.power_off_btn.clicked.connect(self.turn_off)
+        self.channel_selector.currentIndexChanged.connect(self.request_settings_for_channel)
+    
+    def get_ch(self): return int(self.channel_selector.currentText())
+    def set_voltage(self): self.control_signal.emit('set_param', 0, self.get_ch(), self.hv_params['v_set'], self.voltage_input.value())
+    def set_current(self): self.control_signal.emit('set_param', 0, self.get_ch(), self.hv_params['i_set'], self.current_input.value())
+    def turn_on(self): self.control_signal.emit('set_param', 0, self.get_ch(), self.hv_params['pw'], 1)
+    def turn_off(self): self.control_signal.emit('set_param', 0, self.get_ch(), self.hv_params['pw'], 0)
+    def update_feedback(self, msg): self.feedback_label.setText(f"Status: {msg}")
+    def request_settings_for_channel(self): self.control_signal.emit('fetch_settings', 0, self.get_ch(), '', '')
 
-    # 각 버튼 클릭 시 실행될 함수들
-    def get_selected_channel(self): return int(self.channel_selector.currentText())
-    def set_voltage(self): self.control_signal.emit(('set_param', 0, self.get_selected_channel(), 'VSet', self.voltage_input.value()))
-    def set_current(self): self.control_signal.emit(('set_param', 0, self.get_selected_channel(), 'ISet', self.current_input.value()))
-    def turn_on(self): self.control_signal.emit(('set_param', 0, self.get_selected_channel(), 'Pw', 1))
-    def turn_off(self): self.control_signal.emit(('set_param', 0, self.get_selected_channel(), 'Pw', 0))
-    def update_feedback(self, message): self.feedback_label.setText(f"Status: {message}")
+    def set_initial_values(self, settings):
+        ch = self.get_ch()
+        if ch in settings:
+            self.voltage_input.setValue(settings[ch]['v_set'])
+            self.current_input.setValue(settings[ch]['i_set'])
 
-# --- 5. 메인 애플리케이션 클래스 ---
 class MonitoringApp(QMainWindow):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.num_sensors = len(self.config['arduino_settings']['sensors'])
-        self.hv_channels = self.config['caen_hv_settings']['channels_to_monitor']
-        self.setWindowTitle(self.config['ui_options']['window_title'])
-        self.setGeometry(100, 100, 1800, 950)
-        self.setStyleSheet("background-color: #FFF8DC;")
-        self.central_widget = QWidget(); self.setCentralWidget(self.central_widget)
-        self.main_layout = QVBoxLayout(self.central_widget)
-
-        # 데이터 저장을 위한 변수들 초기화
+        self.num_sensors = len(config['arduino_settings']['sensors'])
+        self.hv_channels = config['caen_hv_settings']['channels_to_monitor']
         self.latest_data = {'sensors': {}, 'hv': {}}
-        self.data_buffer, self.graph_time_data = [], []
-        self.graph_temp_data = {i: [] for i in range(self.num_sensors)}
-        self.graph_humi_data = {i: [] for i in range(self.num_sensors)}
-        self.graph_volt_data = {ch: [] for ch in self.hv_channels}
-        self.graph_curr_data = {ch: [] for ch in self.hv_channels}
+        self.data_buffer = []
+        self.graph_time_data, self.graph_temp_data, self.graph_humi_data, self.graph_volt_data, self.graph_curr_data = [], {}, {}, {}, {}
 
-        # UI, 타이머, 로거, 워커 스레드를 순차적으로 설정
         self.setup_ui()
-        self.setup_timers()
         self.setup_logger()
-        self.setup_workers()
+        self.setup_timers()
+
+        self.worker_manager = WorkerManager(self.config)
+        self.worker_manager.arduino_data_ready.connect(self.update_arduino_data)
+        self.worker_manager.caenhv_data_ready.connect(self.update_caenhv_data)
+        self.worker_manager.arduino_status_changed.connect(lambda s: self.env_status_label.setText(s))
+        self.worker_manager.caenhv_status_changed.connect(lambda s: self.hv_status_label.setText(s))
+        self.worker_manager.hv_command_feedback.connect(self.on_hv_feedback)
+        self.worker_manager.hv_initial_settings_ready.connect(self.on_hv_initial_settings_ready)
+        self.worker_manager.start_workers()
 
     def setup_ui(self):
-        """config.json 기반으로 GUI를 동적으로 생성하는 함수"""
+        self.setWindowTitle(self.config['ui_options']['window_title'])
+        self.setGeometry(100, 100, 1600, 900)
+        self.central_widget = QWidget(); self.setCentralWidget(self.central_widget)
+        self.main_layout = QVBoxLayout(self.central_widget)
         status_layout = QGridLayout(); self.main_layout.addLayout(status_layout)
-        font_large = QFont(); font_large.setPointSize(14)
-        style_status_bold = "color: black; font-weight: bold;"
-        style_sensor = "color: blue;"
-        style_voltage = "color: crimson;"
-        style_current = "color: darkorange;"
+        font = QFont(); font.setPointSize(14)
         
-        # 상단 상태 라벨 (연결 상태, 로깅 상태 등)
-        self.env_status_label = QLabel("ENV Status: Standby"); self.env_status_label.setFont(font_large); self.env_status_label.setStyleSheet(style_status_bold)
-        self.hv_status_label = QLabel("HV Status: Standby"); self.hv_status_label.setFont(font_large); self.hv_status_label.setStyleSheet(style_status_bold)
-        self.log_status_label = QLabel("Logging: Standby..."); self.log_status_label.setFont(font_large); self.log_status_label.setStyleSheet(style_status_bold)
-        status_layout.addWidget(self.env_status_label, 0, 0, 1, 2)
-        status_layout.addWidget(self.hv_status_label, 0, 2, 1, 2)
-        status_layout.addWidget(self.log_status_label, 0, 4, 1, 3)
-        self.control_panel_btn = QPushButton("Open HV Control Panel"); self.control_panel_btn.setFont(font_large)
-        self.control_panel_btn.clicked.connect(self.open_control_panel); status_layout.addWidget(self.control_panel_btn, 0, 7, 1, 2)
+        self.env_status_label = QLabel("ENV Status: Standby"); self.env_status_label.setFont(font)
+        self.hv_status_label = QLabel("HV Status: Standby"); self.hv_status_label.setFont(font)
+        self.log_status_label = QLabel("Logging: Standby"); self.log_status_label.setFont(font)
+        self.control_panel_btn = QPushButton("Open HV Control Panel"); self.control_panel_btn.setFont(font)
+        status_layout.addWidget(self.env_status_label, 0, 0, 1, 2); status_layout.addWidget(self.hv_status_label, 0, 2, 1, 2)
+        status_layout.addWidget(self.log_status_label, 0, 4, 1, 2); status_layout.addWidget(self.control_panel_btn, 0, 6, 1, 2)
+        self.control_panel_btn.clicked.connect(self.open_control_panel)
+        
+        self.sensor_labels = {i: {'name': s['name'], 'temp': QLabel(f"{s['name']} T: -"), 'humi': QLabel(f"H: -")} for i, s in enumerate(self.config['arduino_settings']['sensors'])}
+        for i, labels in self.sensor_labels.items(): status_layout.addWidget(labels['temp'], i + 1, 0, 1, 4); status_layout.addWidget(labels['humi'], i + 1, 4, 1, 4)
 
-        # 온/습도 센서 라벨 (설정 파일에 따라 개수 결정)
-        self.sensor_labels = {i: {} for i in range(self.num_sensors)}
-        for i, sensor_info in enumerate(self.config['arduino_settings']['sensors']):
-            name = sensor_info['name']
-            temp_label = QLabel(f"{name} T: - °C"); temp_label.setFont(font_large); temp_label.setStyleSheet(style_sensor)
-            humi_label = QLabel(f"H: - %"); humi_label.setFont(font_large); humi_label.setStyleSheet(style_sensor)
-            row, col = divmod(i, 2)
-            status_layout.addWidget(temp_label, row + 1, col * 4, 1, 2)
-            status_layout.addWidget(humi_label, row + 1, col * 4 + 2, 1, 2)
-            self.sensor_labels[i]['temp'] = temp_label; self.sensor_labels[i]['humi'] = humi_label
-        
-        line1 = QFrame(); line1.setFrameShape(QFrame.HLine); line1.setFrameShadow(QFrame.Sunken); status_layout.addWidget(line1, 3, 0, 1, 9)
-        
-        # HV 채널 라벨 (설정 파일에 따라 개수 결정)
-        volt_header = QLabel("Voltage (V):"); volt_header.setFont(font_large); volt_header.setStyleSheet(style_voltage)
-        curr_header = QLabel("Current (uA):"); curr_header.setFont(font_large); curr_header.setStyleSheet(style_current)
-        status_layout.addWidget(volt_header, 4, 0); status_layout.addWidget(curr_header, 5, 0)
         self.hv_v_labels, self.hv_i_labels = {}, {}
-        for ch in self.hv_channels:
-            v_label = QLabel(f"Ch{ch}: -"); v_label.setFont(font_large); v_label.setStyleSheet(style_voltage)
-            i_label = QLabel(f"Ch{ch}: -"); i_label.setFont(font_large); i_label.setStyleSheet(style_current)
-            status_layout.addWidget(v_label, 4, ch + 1); status_layout.addWidget(i_label, 5, ch + 1)
-            self.hv_v_labels[ch] = v_label; self.hv_i_labels[ch] = i_label
-        
-        # 4분할 그래프 설정
-        graph_layout = QGridLayout(); self.main_layout.addLayout(graph_layout)
-        plots = {'temp': pg.PlotWidget(axisItems={'bottom': pg.DateAxisItem(orientation='bottom')}),'humi': pg.PlotWidget(axisItems={'bottom': pg.DateAxisItem(orientation='bottom')}),'volt': pg.PlotWidget(axisItems={'bottom': pg.DateAxisItem(orientation='bottom')}),'curr': pg.PlotWidget(axisItems={'bottom': pg.DateAxisItem(orientation='bottom')})}
-        plots['humi'].setXLink(plots['temp']); plots['volt'].setXLink(plots['temp']); plots['curr'].setXLink(plots['temp']) # X축 동기화
-        plots['temp'].setTitle("Temperature", color='k'); plots['temp'].setLabel('left', 'Temp (°C)'); plots['humi'].setTitle("Humidity", color='k'); plots['humi'].setLabel('left', 'Humidity (%)'); plots['volt'].setTitle("HV Voltage", color='k'); plots['volt'].setLabel('left', 'Voltage (V)'); plots['curr'].setTitle("HV Current", color='k'); plots['curr'].setLabel('left', 'Current (uA)')
-        graph_layout.addWidget(plots['temp'], 0, 0); graph_layout.addWidget(plots['humi'], 0, 1); graph_layout.addWidget(plots['volt'], 1, 0); graph_layout.addWidget(plots['curr'], 1, 1)
-        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f']
-        
-        # 레전드 폰트 크기 설정
-        for plot in plots.values():
-            legend = plot.addLegend()
-            if legend:
-                dummy_item = plot.plot(pen=None, name=" ");
-                if legend.items: label_item = legend.items[0][1]; label_item.setFont(QFont("sans-serif", 12))
-                plot.removeItem(dummy_item)
-
-        # 그래프 곡선(curve) 객체 생성
-        self.temp_curves, self.humi_curves = {}, {}
-        for i, sensor_info in enumerate(self.config['arduino_settings']['sensors']):
-            name = sensor_info['name']; color = colors[i % len(colors)]
-            self.temp_curves[i] = plots['temp'].plot(pen=pg.mkPen(color, width=3), name=name)
-            self.humi_curves[i] = plots['humi'].plot(pen=pg.mkPen(color, width=3), name=name)
-        
-        self.volt_curves, self.curr_curves = {}, {}
+        base_row = len(self.sensor_labels) + 1
         for i, ch in enumerate(self.hv_channels):
-            color = colors[i % len(colors)]; label = f"Ch{ch}"
-            self.volt_curves[ch] = plots['volt'].plot(pen=pg.mkPen(color, width=3), name=label)
-            self.curr_curves[ch] = plots['curr'].plot(pen=pg.mkPen(color, width=3), name=label)
+            self.hv_v_labels[ch] = QLabel(f"Ch{ch} V: -"); self.hv_i_labels[ch] = QLabel(f"Ch{ch} I: -")
+            row, col = divmod(i, 4)
+            status_layout.addWidget(self.hv_v_labels[ch], base_row + row, col*2); status_layout.addWidget(self.hv_i_labels[ch], base_row + row, col*2 + 1)
+
+        graph_layout = QGridLayout(); self.main_layout.addLayout(graph_layout)
+        plots = {k: pg.PlotWidget(axisItems={'bottom': pg.DateAxisItem(orientation='bottom')}) for k in ['temp', 'humi', 'volt', 'curr']}
+        for p in plots.values(): p.addLegend()
+        graph_layout.addWidget(plots['temp'], 0, 0); graph_layout.addWidget(plots['humi'], 0, 1)
+        graph_layout.addWidget(plots['volt'], 1, 0); graph_layout.addWidget(plots['curr'], 1, 1)
+        plots['temp'].setTitle("Temperature"); plots['humi'].setTitle("Humidity"); plots['volt'].setTitle("HV Voltage"); plots['curr'].setTitle("HV Current")
         
-        # 하단 정보 라벨 (작성자, 시간)
-        bottom_layout = QGridLayout(); self.main_layout.addLayout(bottom_layout)
-        font_small = QFont(); font_small.setPointSize(12)
-        self.shifter_label = QLabel(self.config['ui_options']['shifter_name']); self.shifter_label.setFont(font_small)
-        self.datetime_label = QLabel("-"); self.datetime_label.setFont(font_small)
-        self.shifter_label.setAlignment(Qt.AlignLeft); self.datetime_label.setAlignment(Qt.AlignRight)
-        bottom_layout.addWidget(self.shifter_label, 0, 0); bottom_layout.addWidget(self.datetime_label, 0, 1)
-    
-    def setup_timers(self):
-        """기능별 타이머를 생성하고 시작하는 함수"""
-        ui_cfg = self.config['ui_options']; log_cfg = self.config['logging_options']
-        # 30분마다 파일에 기록
-        self.log_timer = QTimer(); self.log_timer.timeout.connect(self.log_data_buffer); self.log_timer.start(log_cfg['bulk_write_interval_ms'])
-        # 1분마다 데이터 캡처
-        self.capture_timer = QTimer(); self.capture_timer.timeout.connect(self.capture_data_point); self.capture_timer.start(log_cfg['capture_interval_ms'])
-        # 1초마다 하단 시간 업데이트
-        self.datetime_timer = QTimer(); self.datetime_timer.timeout.connect(self.update_datetime); self.datetime_timer.start(1000)
-        # 1분마다 그래프 업데이트
-        self.graph_update_timer = QTimer(); self.graph_update_timer.timeout.connect(self.update_graphs); self.graph_update_timer.start(ui_cfg['graph_update_interval_ms'])
-        # 2초마다 상단 인디케이터 업데이트
-        self.indicator_update_timer = QTimer(); self.indicator_update_timer.timeout.connect(self.update_indicators); self.indicator_update_timer.start(ui_cfg['indicator_update_interval_ms'])
+        self.temp_curves, self.humi_curves, self.volt_curves, self.curr_curves = {}, {}, {}, {}
+        for i, s in enumerate(self.config['arduino_settings']['sensors']): self.temp_curves[i] = plots['temp'].plot(pen=(i, self.num_sensors*1.3), name=s['name']); self.humi_curves[i] = plots['humi'].plot(pen=(i, self.num_sensors*1.3), name=s['name'])
+        for i, ch in enumerate(self.hv_channels): self.volt_curves[ch] = plots['volt'].plot(pen=(i, len(self.hv_channels)*1.3), name=f'Ch{ch}'); self.curr_curves[ch] = plots['curr'].plot(pen=(i, len(self.hv_channels)*1.3), name=f'Ch{ch}')
 
     def setup_logger(self):
-        """CSV 로거를 설정하고 헤더를 작성하는 함수"""
         log_cfg = self.config['logging_options']
         log_filename = f"{log_cfg['log_file_prefix']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         self.log_file_path = log_filename
         header = ['Timestamp']
-        for sensor_info in self.config['arduino_settings']['sensors']: name = sensor_info['name'].replace(" ", "_"); header.extend([f'{name}_T', f'{name}_H'])
+        for s in self.config['arduino_settings']['sensors']: header.extend([f'{s["name"]}_T', f'{s["name"]}_H'])
         for ch in self.hv_channels: header.extend([f'Ch{ch}_V', f'Ch{ch}_I'])
         with open(self.log_file_path, 'w', newline='') as f: csv.writer(f).writerow(header)
-        print(f"Log file created: {self.log_file_path}")
 
-    def setup_workers(self):
-        """백그라운드 통신을 위한 워커 스레드를 설정하고 시작하는 함수"""
-        arduino_cfg = self.config['arduino_settings']
-        self.arduino_worker = ArduinoWorker(arduino_cfg['port'], arduino_cfg['baud_rate'])
-        self.arduino_thread = QThread(); self.arduino_worker.moveToThread(self.arduino_thread)
-        self.arduino_thread.started.connect(self.arduino_worker.run); self.arduino_worker.data_ready.connect(self.update_arduino_data)
-        self.arduino_worker.connection_status.connect(self.update_env_status); self.arduino_thread.start()
-        
-        hv_cfg = self.config['caen_hv_settings']
-        self.caenhv_worker = CaenHvWorker(hv_cfg)
-        self.caenhv_thread = QThread(); self.caenhv_worker.moveToThread(self.caenhv_thread)
-        self.caenhv_thread.started.connect(self.caenhv_worker.run); self.caenhv_worker.data_ready.connect(self.update_caenhv_data)
-        self.caenhv_worker.connection_status.connect(self.update_hv_status); self.caenhv_worker.command_feedback.connect(self.on_hv_feedback)
-        self.caenhv_thread.start()
-    
+    def setup_timers(self):
+        ui_cfg = self.config['ui_options']; log_cfg = self.config['logging_options']
+        self.indicator_timer = QTimer(self); self.indicator_timer.timeout.connect(self.update_indicators); self.indicator_timer.start(ui_cfg['indicator_update_interval_ms'])
+        self.graph_timer = QTimer(self); self.graph_timer.timeout.connect(self.update_graphs); self.graph_timer.start(ui_cfg['graph_update_interval_ms'])
+        self.capture_timer = QTimer(self); self.capture_timer.timeout.connect(self.capture_data_point); self.capture_timer.start(log_cfg['capture_interval_ms'])
+        self.log_timer = QTimer(self); self.log_timer.timeout.connect(self.log_data_buffer); self.log_timer.start(log_cfg['bulk_write_interval_ms'])
+
+    def update_arduino_data(self, idx, temp, humi): self.latest_data['sensors'][idx] = {'t': temp, 'h': humi}
+    def update_caenhv_data(self, results):
+        for _, ch, vmon, imon in results: self.latest_data['hv'][ch] = {'v': vmon, 'i': imon}
+
     def update_indicators(self):
-        """2초마다 상단의 모든 텍스트 라벨을 최신 데이터로 업데이트"""
-        for i, sensor_info in enumerate(self.config['arduino_settings']['sensors']):
-            name = sensor_info['name']; data = self.latest_data['sensors'].get(i, {'t': None, 'h': None})
-            if data['t'] is None or np.isnan(data['t']):
-                self.sensor_labels[i]['temp'].setText(f"{name} T: None"); self.sensor_labels[i]['humi'].setText(f"H: None")
-            else:
-                self.sensor_labels[i]['temp'].setText(f"{name} T: {data['t']:.2f} °C"); self.sensor_labels[i]['humi'].setText(f"H: {data['h']:.2f} %")
-        for ch in self.hv_channels:
-            data = self.latest_data['hv'].get(ch, {'v': 0, 'i': 0})
-            self.hv_v_labels[ch].setText(f"Ch{ch}: {data['v']:.2f}"); self.hv_i_labels[ch].setText(f"Ch{ch}: {data['i']:.4f}")
-        self.log_status_label.setText(f"Logging: {len(self.data_buffer)} point(s) collected (Next log in {self.log_timer.remainingTime()//60000 + 1} min)")
+        for i, data in self.latest_data['sensors'].items():
+            self.sensor_labels[i]['temp'].setText(f"{self.sensor_labels[i]['name']} T: {data['t']:.2f} C" if data['t'] is not None else "T: Error")
+            self.sensor_labels[i]['humi'].setText(f"H: {data['h']:.2f} %" if data['h'] is not None else "H: Error")
+        for ch, data in self.latest_data['hv'].items():
+            self.hv_v_labels[ch].setText(f"Ch{ch} V: {data['v']:.2f}" if not np.isnan(data['v']) else f"Ch{ch} V: Error")
+            self.hv_i_labels[ch].setText(f"Ch{ch} I: {data['i']:.4f}" if not np.isnan(data['i']) else f"Ch{ch} I: Error")
+        self.log_status_label.setText(f"Logging: {len(self.data_buffer)} points buffered")
 
     def update_graphs(self):
-        """1분마다 그래프에 새로운 데이터 포인트를 추가"""
-        timestamp = time.time(); self.graph_time_data.append(timestamp)
+        ts = time.time(); self.graph_time_data.append(ts)
+        max_points = 1440 # 24 hours of data
+        if len(self.graph_time_data) > max_points: self.graph_time_data.pop(0)
+        
         for i in range(self.num_sensors):
-            sensor = self.latest_data['sensors'].get(i, {'t': np.nan, 'h': np.nan})
-            self.graph_temp_data[i].append(sensor['t']); self.graph_humi_data[i].append(sensor['h'])
+            data = self.latest_data['sensors'].get(i, {'t': np.nan, 'h': np.nan})
+            d_list = self.graph_temp_data.setdefault(i, []); d_list.append(data['t']); self.temp_curves[i].setData(self.graph_time_data, d_list, connect='finite')
+            if len(d_list) > max_points: d_list.pop(0)
+            d_list = self.graph_humi_data.setdefault(i, []); d_list.append(data['h']); self.humi_curves[i].setData(self.graph_time_data, d_list, connect='finite')
+            if len(d_list) > max_points: d_list.pop(0)
         for ch in self.hv_channels:
-            hv = self.latest_data['hv'].get(ch, {'v': 0, 'i': 0})
-            self.graph_volt_data[ch].append(hv['v']); self.graph_curr_data[ch].append(hv['i'])
-        # 그래프 데이터가 너무 많아지면(24시간=1440분) 오래된 데이터 삭제
-        if len(self.graph_time_data) > 1440:
-            self.graph_time_data.pop(0)
-            for i in range(self.num_sensors): self.graph_temp_data[i].pop(0); self.graph_humi_data[i].pop(0)
-            for ch in self.hv_channels: self.graph_volt_data[ch].pop(0); self.graph_curr_data[ch].pop(0)
-        # 모든 곡선의 데이터를 업데이트하여 그래프를 다시 그림
-        for i in range(self.num_sensors):
-            # connect='finite' 옵션은 NaN 값이 있을 때 선을 끊어서 그려줌
-            self.temp_curves[i].setData(self.graph_time_data, self.graph_temp_data[i], connect='finite')
-            self.humi_curves[i].setData(self.graph_time_data, self.graph_humi_data[i], connect='finite')
-        for ch in self.hv_channels:
-            self.volt_curves[ch].setData(self.graph_time_data, self.graph_volt_data[ch])
-            self.curr_curves[ch].setData(self.graph_time_data, self.graph_curr_data[ch])
+            data = self.latest_data['hv'].get(ch, {'v': np.nan, 'i': np.nan})
+            d_list = self.graph_volt_data.setdefault(ch, []); d_list.append(data['v']); self.volt_curves[ch].setData(self.graph_time_data, d_list, connect='finite')
+            if len(d_list) > max_points: d_list.pop(0)
+            d_list = self.graph_curr_data.setdefault(ch, []); d_list.append(data['i']); self.curr_curves[ch].setData(self.graph_time_data, d_list, connect='finite')
+            if len(d_list) > max_points: d_list.pop(0)
 
-    def capture_data_point(self):
-        """1분마다 호출되어 최신 데이터를 버퍼에 저장"""
-        snapshot = {'timestamp': datetime.now().isoformat(), 'sensors': self.latest_data['sensors'].copy(), 'hv': self.latest_data['hv'].copy()}
-        self.data_buffer.append(snapshot)
-
+    def capture_data_point(self): self.data_buffer.append({'ts': datetime.now().isoformat(), 'sensors': self.latest_data['sensors'].copy(), 'hv': self.latest_data['hv'].copy()})
+    
     def log_data_buffer(self):
-        """30분마다 호출되어 버퍼의 모든 데이터를 CSV 파일에 기록"""
         if not self.data_buffer: return
-        buffer_copy = self.data_buffer.copy(); self.data_buffer.clear()
+        buffer_copy, self.data_buffer = self.data_buffer, []
         try:
             with open(self.log_file_path, 'a', newline='') as f:
                 writer = csv.writer(f)
                 for item in buffer_copy:
-                    row = [item['timestamp']]
-                    for i in range(self.num_sensors):
-                        sensor = item['sensors'].get(i, {'t': np.nan, 'h': np.nan}); row.extend([sensor['t'], sensor['h']])
-                    for ch in self.hv_channels:
-                        hv = item['hv'].get(ch, {'v': 0, 'i': 0}); row.extend([hv['v'], hv['i']])
+                    row = [item['ts']]
+                    for i in range(self.num_sensors): row.extend([item['sensors'].get(i, {}).get('t'), item['sensors'].get(i, {}).get('h')])
+                    for ch in self.hv_channels: row.extend([item['hv'].get(ch, {}).get('v'), item['hv'].get(ch, {}).get('i')])
                     writer.writerow(row)
-            print(f"[{datetime.now().isoformat()}] Bulk logged {len(buffer_copy)} data points.")
-        except IOError as e: print(f"File write error: {e}"); self.data_buffer = buffer_copy + self.data_buffer
-    
-    def update_arduino_data(self, idx, temp, humi):
-        """Arduino 워커로부터 받은 최신 센서 데이터를 저장"""
-        self.latest_data['sensors'][idx] = {'t': temp if temp is not None else np.nan, 'h': humi if humi is not None else np.nan}
-        
-    def update_caenhv_data(self, results):
-        """HV 워커로부터 받은 최신 HV 데이터를 저장"""
-        for _, ch, vmon, imon in results:
-            self.latest_data['hv'][ch] = {'v': vmon, 'i': imon}
-            
-    def update_env_status(self, status): self.env_status_label.setText(status)
-    def update_hv_status(self, status): self.hv_status_label.setText(status)
-    def update_datetime(self): self.datetime_label.setText(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        except IOError: self.data_buffer = buffer_copy + self.data_buffer
 
     def open_control_panel(self):
-        """제어판 창을 열거나 이미 열려있으면 앞으로 가져옴"""
         if not hasattr(self, 'control_panel'):
-            self.control_panel = HVControlPanel(self.hv_channels, self)
-            self.control_panel.control_signal.connect(self.queue_hv_command)
-        self.control_panel.show()
-        self.control_panel.raise_()
-        self.control_panel.activateWindow()
-    
-    def queue_hv_command(self, command):
-        """제어판에서 받은 명령을 HV 워커의 큐에 넣음"""
-        self.caenhv_worker.command_queue.put(command)
+            hv_params = self.config['caen_hv_settings']['parameters']
+            self.control_panel = HVControlPanel(self.hv_channels, hv_params, self)
+            self.control_panel.control_signal.connect(self.worker_manager.queue_hv_command)
+        self.control_panel.show(); self.control_panel.raise_()
+        self.control_panel.request_settings_for_channel()
 
-    def on_hv_feedback(self, message):
-        """HV 워커로부터 받은 피드백을 제어판에 표시"""
-        if hasattr(self, 'control_panel'):
-            self.control_panel.update_feedback(message)
+    def on_hv_feedback(self, msg):
+        if hasattr(self, 'control_panel'): self.control_panel.update_feedback(msg)
+    
+    def on_hv_initial_settings_ready(self, settings):
+        if hasattr(self, 'control_panel'): self.control_panel.set_initial_values(settings)
 
     def closeEvent(self, event):
-        """프로그램 종료 시 호출되는 함수"""
-        print("Closing application... saving remaining data.")
-        self.log_data_buffer() # 버퍼에 남은 데이터 저장
-        self.arduino_worker.stop(); self.caenhv_worker.stop() # 모든 워커 스레드 중지
-        self.arduino_thread.quit(); self.caenhv_thread.quit()
-        self.arduino_thread.wait(); self.caenhv_thread.wait() # 스레드가 완전히 끝날 때까지 대기
+        self.log_data_buffer()
+        self.worker_manager.stop_workers()
         event.accept()
 
-# --- 6. 프로그램 실행부 ---
+def load_config(config_file):
+    with open(config_file, 'r', encoding='utf-8') as f: return json.load(f)
+
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    window = MonitoringApp(CONFIG)
+    default_config = 'config.json'
+    config_file = sys.argv[1] if len(sys.argv) > 1 else default_config
+    if not os.path.exists(config_file):
+        print(f"Error: Config file '{config_file}' not found.")
+        sys.exit(1)
+    config = load_config(config_file)
+    window = MonitoringApp(config)
     window.show()
     sys.exit(app.exec_())
-
