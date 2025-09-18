@@ -42,7 +42,8 @@
     }
   },
   "ui_options": {
-    "window_title": "Real-time Monitoring System v2.3"
+    "window_title": "Real-time Monitoring System v2.3",
+    "shifter_name": "Jiyoung Choi (Chonnam Nat'l Univ.)"
   },
   "ui_styles": {
     "background_color": "#FFF8DC",
