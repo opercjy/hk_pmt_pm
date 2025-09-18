@@ -1,0 +1,36 @@
+{
+  "arduino_settings": {
+    "port": "/dev/ttyACM0",
+    "baud_rate": 9600,
+    "sensors": [
+      { "pin": 2, "name": "NIM Crate Temp" }
+    ]
+  },
+  "caen_hv_settings": {
+    "link_type": "TCPIP",
+    "connection_argument": "192.168.0.250",
+    "system_type": "N1470",
+    "username": "user",
+    "password": "password",
+    "channels_to_monitor": [0, 1, 2, 3],
+    "parameters": {
+      "v_mon": "VMon",
+      "i_mon": "IMon",
+      "v_set": "V0Set",
+      "i_set": "I0Set",
+      "pw": "Pw",
+      "status": "ChStatus"
+    }
+  },
+  "ui_options": {
+    "window_title": "N1470 Monitoring @NIM Crate",
+    "shifter_name": "Jiyoung Choi (Chonnam Nat'l Univ.)",
+    "indicator_update_interval_ms": 2000,
+    "graph_update_interval_ms": 60000
+  },
+  "logging_options": {
+    "log_file_prefix": "n1470_log",
+    "capture_interval_ms": 60000,
+    "bulk_write_interval_ms": 1800000
+  }
+}
