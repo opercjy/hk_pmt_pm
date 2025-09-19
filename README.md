@@ -44,8 +44,9 @@ sudo usermod -a -G dialout $USER
 
 > **중요**: 명령어 실행 후 반드시 **재부팅** 또는 **재로그인**해야 합니다.
 
-**2단계: Python 라이브러리 설치**
+**2단계: C/C++ HV Wrapper 및 Python 라이브러리 설치**
 
+https://www.caen.it/products/caen-hv-wrapper-library/ 링크에서 리눅스 버전 받아서 설치
 ```bash
 pip install -r requirements.txt
 ```
